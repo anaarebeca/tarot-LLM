@@ -1,0 +1,202 @@
+Change in the agent workflow:
+
+	In the original design, the main reading was done by following a fixed sequence of tool calls that were hard-coded in the agent (validate, look up meanings, search guides, analyze, generate, save). We should redesign it such that the SLM chooses itself which tools to call and when. This could be done by using a standard tool-calling loop: at each step the SLM receives the user’s message, the conversation so far, the list of available tools, and the results of the tools it already called. After that, it picks one action ( call a tool, ask the user a question, or write the final answer). When it gets the result, it decides again, and stops when it thinks it has all the information that's needed to answer. The code only runs this loop and executes whichever tool the SLM selects, but never decides what comes next. The SLM will be guided by “rules” in three ways:
+
+-The system prompt describes the goal and the constraints (produce one connected reading from validated cards, reuse the stored reading for follow-ups, ask the user when the spread or cards are missing) rather than a step-by-step guide
+-All the MCP tools have a clear description that states what it does, when it's used, and what the input should be (for example, analyze_spread needs validated cards, load_reading is for follow-ups)
+-Tool results will work as feedback. A failed validation or a “no saved reading found” message basically tells the SLM what to do next.
+Some safeguards remain, but none of them dictate the order of tools. The loop has a maximum number of steps so the SLM can’t run forever. If a tool fails, the error is returned to the SLM as text instead of crashing the system, and each tool refuses invalid input on its own so the SLM can’t skip a necessary step without getting an error back.
+The fixed sequence can still be used, but only as the reference trajectory in evaluation: we could compare the tools the SLM actually called against the ones that we expect it to call based on that fixed order, and check that the required tools were called, that no unnecessary ones were, and that dependencies such as a validation that needs to be done before the analysis are respected.
+
+
+What changes will happen in Milestone2.doc:
+
+Section 2-Golden Dataset
+
+2.1"Expected Behaviour: which tools the agent should call, which spread it should use, and which guide chunks retrieval should return"
+could be changed to something like: "Expected Behaviour: the reference trajectory (the tools a correct run needs, the dependencies between them, and the tools that would be unnecessary), the spread it should use, and which guide chunks retrieval should return. There can be more than one valid order, since the agent chooses its own path."
+
+2.2"Agent Decisions: code check that compares the logged tool calls and the chosen spread with the expected ones."
+could be changed to something like: "Agent Decisions: code check that compares the logged tool calls with the reference trajectory. We can report separately: required tools called, unnecessary tools called, dependency order respected (not necessarily identical order), correct branching (missing spread => list_spreads or a question to the user, invalid input => asks the user to fix it, follow-up => the right tool), number of steps used and recovery after a tool error."
+
+2.3 Could add one more example type to the "Types" list, "missing-input cases (no spread, duplicate card, missing orientation), where the expected behaviour is asking or fixing, not generating a reading"
+
+Section 4-Agent and tools
+
+4.1"The agent is an orchestrator around the SLM. Code runs the parts of a reading that must be right every time, and the SLM makes the judgment calls and writes the text."
+could be changed to something like: "The agent is a tool-calling loop around the SLM, so the code only runs the loop and executes the tool the SLM selects. The SLM decides which tool to call, in what order, when to ask the user a question, or when it has enough information to write the final answer."
+
+4.2  An addition to the list of decisions: "Order of tools: for every request, the SLM decides which tools are needed and in what order, based on what the user gave it (spread, cards, context) and on the results of the tools already called."
+
+4.3  Delete the "What is fixed: the main reading follows a fixed sequence of tool calls driven by code..." paragraph, including the argument that small models are unreliable at sequencing, and replace it with the "Change in the agent" one plus the guardrails (max steps, errors returned as text, tools reject invalid input) and the tool descriptions, system prompt, and walkthrough.
+
+4.4For the tool list, we should extend each description with: when to use it, what input it needs, and what error it returns
+
+4.5For the "Which tool serves which follow-up: ..." part, we can add at the start: "Expected routing (that is not enforced by code, because the SLM chooses it, and we just measure it):"
+
+4.6  In addition to the last sentence about the SLM handling language and the server holding the knowledge: "The server also enforces the dependencies by refusing invalid input (for example, analyze_spread rejects cards that were not validated), so the SLM cannot skip a necessary step without receiving an error."
+
+Section 5-Model choices
+
+5.1 For the Qwen3 4B part, I think we should change it a bit now and mention that: "Since the model now chooses its own tool order, tool-calling reliability should be the main selection criterion, and can be measured by the trajectory check when comparing the 3 SLMs."
+
+Section 6- The Plan
+
+6.2  In the Warning line (risks and fallbacks), could add: "Risk: the SLM chooses tools poorly (skips validation, loops, or calls unnecessary tools). Fallback: stronger tool descriptions and system prompt, then a larger Qwen3 size, and as a last resort the fixed pipeline, which is also our comparison point."
+6.3  Week 10: "Connect the first SLM so it can do a full reading using the tools" => "...so it can run the tool-calling loop and do a full reading by choosing its own tools. Also should log every tool call for the trajectory check."
+6.4  Week 13: we could add the experiment "autonomous agent vs fixed pipeline vs no tools" next to the no-RAG experiment
+
+Section 7-End to end
+
+7.1 Addition to the intro sentence: "The steps below are the typical trajectory for a full reading. The SLM chooses them itself; it is not forced through them by code."
+7.2 Step 7 "One generation" changed to "Final answer. When the SLM judges it has enough information, it writes the reading as its final action (one reading that goes through the positions in order, says how the cards relate, and ends with a short summary)."
+7.3 Step 8 "Saving once" modified as "Saving. Before finishing, the SLM calls save_reading, because its instructions say a reading is only complete once it can be reloaded for follow-ups. If it forgets, the trajectory check marks it as a missing required tool."
+7.4 Step 9 can also contain something along the lines of "Which tool is called depends on the question; the SLM decides."
+7.5 In the sequence diagram, we should rename the "Agent" participant lines to show the loop, add a note over A and S: "Loop: SLM sees messages + tools + previous results => picks one action (either a tool call or to ask the user or to compute the final answer)". Also, can mark the sequence of calls as "typical trajectory", not "fixed".
+7.6 Flowchart: the node "Agent - MCP client and loop" could be renamed to "Agent - MCP client and tool-calling loop (SLM chooses the tools)" just so it is clear.
+
+
+Tool walkthrough:
+
+The SLM does not see the code, it only sees, for each tool, a name, a description and an input schema. The wording matters a lot because it is the main way we "give rules" to the SLM.
+
+1.list_spreads
+Description given to the SLM: "Returns all available spreads with their name, number of cards, theme and a one-line description. Use this when the user has not named a spread, to choose the best fit (a one-card spread for a quick question, three cards for past/present/future, Celtic Cross for a complex situation). Do not use it if the user already named a spread."
+Input: none
+Output: list of spreads
+
+2.get_spread
+Description: "Loads one spread and returns its ordered positions, each with its meaning and theme (general, love, career, mood, spiritual). Use it once a spread is chosen, before looking at cards, because every card is interpreted through its position."
+Input: spread_id
+Output: ordered positions
+Error: "Unknown spread 'xyz'. Available spreads: ..."
+
+3.update_user_context
+Description: "Stores personal details the user shared (situation, topic, feelings, the question they want answered) as structured fields, so the reading can be personalized. Use it whenever the user shares something personal, in the first message or later. Do not invent details the user did not give."
+Input: structured fields (situation, topic, question, mood)
+Output: confirmation with the stored context
+
+4.validate_reading
+Description: "Checks that the submitted cards fit the chosen spread: correct number of cards, no duplicates, valid card names, an orientation (upright or reversed) for every card. Must be called, and must pass, before looking up meanings or analyzing. If it fails, tell the user what to fix and do not continue."
+Input: spread_id, list of {position, card, orientation}
+Output: "ok", or a list of problems as "Spread needs 3 cards, only got 2", "Duplicate card: The Tower", "Position 2: orientation is missing", "Unknown card 'The Towr', did you mean 'The Tower'?"
+
+5.get_card_meaning
+Description: "Returns the curated meaning of one card for one orientation: the general meaning plus the field matching the theme of its position (love, career, mood or spiritual). Reversed cards return their own reversed meaning, never flip the upright one yourself. Call it for every drawn card, and also for follow-ups about one card's detail."
+Input: card, orientation, theme
+Output: general meaning, theme-specific meaning, keywords
+
+6.search_guides
+Description: "Searches the guide texts about card combinations, suits and reversals. Use it for knowledge beyond a single card: how two cards interact, what a suit means, how reversals work. Can be filtered by type (combination, suit, reversal) and by cards."
+Input: query, optional type filter, optional list of cards
+Output: the top matching guide chunks with their source
+
+7.analyze_spread
+Description: "Looks at all drawn cards together with fixed rules and returns connection notes: dominant suit and element, number of Major Arcana cards, ratio of reversed cards, and notable pairs (pairs that have a combination text). Use it after validation so you have explicit connections to narrate in the reading."
+Input: validated reading
+Output: connection notes
+Error: "Reading was not validated. Call validate_reading first."
+
+8.save_reading
+Description: "Stores the full structured reading (spread, cards, positions, orientations, user context, connection notes, interpretation, short summary) so follow-up questions can reuse it. Call it once the reading is written."
+Input: the structured reading
+Output: reading_id
+
+9.load_reading
+Description: "Restores a saved reading. Use it at the start of every follow-up question instead of relying on the chat history."
+Input: reading_id (or the latest one of this session)
+Output: the stored reading
+WError: "No saved reading found for this session. Ask the user for the cards and spread."
+
+How the SLM uses them: at each step it looks at what it already knows (spread? cards? validated? context? reading saved?) and at what the tool descriptions say each tool needs. A tool whose requirements are not met is not called yet, the SLM first calls the tool that provides the missing piece. This is also why each description should state its requirements.
+
+
+The prompt the SLM starts with:
+
+The system prompt describes the goal and the limits, not the steps.
+Draft:
+"You are a tarot reading assistant. You do not draw cards, the user tells you the cards from their own deck, with orientation and position. Your goal is to give one connected reading in which every card is interpreted through its position and orientation and related to the other cards, ending with a short summary. Use the available tools to get facts. Never invent card meanings, always use what the tools return. Rules: If you do not know the spread, either ask the user or choose one with the tools. Cards must be validated before they are interpreted. If validation fails, ask the user to fix the problem. If the user shares personal details, store them and use them to personalize the reading. If the reading needs context that is missing and it matters, you may ask one short question, otherwise continue. A reading is complete only after it is saved, so it can be reused for follow-ups. For a follow-up, restore the saved reading first, and only look up more information if the question needs something that is not already in the reading. If the question is not about tarot or the reading, answer briefly without tools. You can call tools one after another, and you decide when you have enough information to answer."
+
+Each loop step, the SLM therefore receives: this system prompt, the tool descriptions that I just mentioned, the whole conversation so far, and every tool call with its result so far.
+
+
+A full example of how the SLM should decide:
+
+Example A: a bare prompt, one card, no spread, and no context
+
+User message: "I drew The Tower reversed. What now?"
+
+Now, at the start, the SLM has the system prompt, the nine tool descriptions, and this message.
+
+1. Analysis of the input
+The SLM reads the message and sorts what it knows from what it does not:
+	-Cards: The Tower, reversed => known
+	-Spread: not named=> missing
+	-User context: none
+	-Intent: a new reading (there is no saved reading, and the user is not asking about an earlier one)
+Decision: it cannot interpret a card without a position, so it needs a spread. The user gave a single card and a short question, which fits a one-card spread. It does not ask the user, because the tools can answer this.
+Action: call list_spreads
+Result: [One-Card (1 card, quick answer), Three-Card Past/Present/Future (3), Celtic Cross (10), ...]
+
+2.Decision: One-Card matches the single card the user gave, and the other spreads need more cards than the user has. Now it needs the position(s) of that spread.
+Action: call get_spread("one-card")
+Result: position 1 = "Core message", theme: general
+
+3.Decision: it has a spread, a card and an orientation. The rule says cards must be validated before being interpreted.
+Action: call validate_reading(spread "one-card", [{position 1, "The Tower", reversed}])
+Result: ok
+
+4.Decision: it needs the meaning of the card from the knowledge base, not from its own memory, and it has to be the reversed one.
+Action: call get_card_meaning("The Tower", "reversed", "general")
+Result: "The Tower - reversed: avoiding or delaying a necessary change, fear of disruption, a collapse that is smaller or internal..." plus keywords
+
+5.Decision: the card is reversed, so the guide text about reversals could add useful nuance. The user gave no second card, so there is no pair to look up, and searching for a combination would be useless.
+Action: call search_guides("how to read reversed Major Arcana", type "reversal")
+Result: a reversal guide chunk (reversed cards often show blocked, internal or delayed energy)
+
+6.Decision: with one card there is little to connect, but the reversal ratio and the Major Arcana count are still useful facts for the reading, and the call is cheap. It calls analyze_spread, even if it knows no pairs will come out.
+Action: call analyze_spread(validated reading)
+Result: Major Arcana: 1 of 1, reversed ratio: 100%, notable pairs: none
+
+7.Decision: the user shared no personal details. Asking for context would delay a quick one-card answer, so it continues without asking, and offers personalization at the end. There is no context to store, so it skips update_user_context.
+It now has everything: the position, the card meaning, the guide text and the connection notes
+Action: writes the reading text but does not send it yet, because rule 4 says the reading must be saved first
+Action: call save_reading(spread, card, position, orientation, no context, connection notes, interpretation, summary)
+Result: reading_id = "r_001"
+
+8.Final answer to the user:
+"Your core message is The Tower reversed: a change that is needed but is being avoided or delayed... (interpretation using the retrieved meaning and the reversal note). If you tell me what is going on in your life, I can personalize this reading."
+
+Trajectory logged: list_spreads, get_spread, validate_reading, get_card_meaning, search_guides, analyze_spread, save_reading. The trajectory check compares this with the reference. No unnecessary calls, validation before analysis, spread chosen through list_spreads because it was missing.
+
+
+Example B: how the same request would go differently with other inputs
+
+B1. The user names the spread and gives context: "Three-card reading, past/present/future: Death upright, The Tower reversed, The Star upright. I'm going through a divorce."
+	-Spread is named, so list_spreads is skipped (calling it would count as an unnecessary call)
+	-The user shared personal information, so the SLM calls update_user_context (situation: divorce)
+   	-Then get_spread, validate_reading, get_card_meaning for each of the 3 cards (using the theme of each position), search_guides (the SLM asks for combinations of the drawn cards, if analyze_spread or its own judgment suggests it), analyze_spread, then the final reading that refers to the divorce, then save_reading
+   	-The order between update_user_context and get_spread, or between the three get_card_meaning calls, is free. Several orders are valid, which is why the evaluation checks dependencies and not an identical sequence.
+
+B2. The user gives a duplicated card: "Past/Present/Future: The Tower, The Tower, The Star".
+	-get_spread, then validate_reading returns "Duplicate card: The Tower"
+   	-The SLM stops the chain and asks the user to correct it. It does not call get_card_meaning or analyze_spread. If it tried analyze_spread, the tool would answer "Reading was not validated" and push it back
+
+B3.The user gives cards but no spread and no positions: "I pulled The Moon, The Sun, Justice."
+   	-Three cards, so the SLM calls list_spreads, picks Three-Card Past/Present/Future, then asks the user which card goes in which position, because it does not invent the positions of the user's own cards
+
+B4. Follow-up, same conversation: "Does that mean the divorce is on me?"
+   	-The SLM calls load_reading, sees that the divorce is in the stored context and that the Tower reversed was in the Past position
+   	-The question can be answered from the stored reading, so it calls no other tool and answers directly
+
+B7. "Can you give me a recipe for pasta?"
+   	-The SLM sees that this is not about tarot or the reading and answers briefly or declines, with no tool calls
+
+B8. A follow-up when no reading exists yet:
+   	-load_reading returns "No saved reading found in this session", the SLM reads this error as feedback and asks the user for the cards and spread instead of inventing a reading
+
+Why the SLM can decide this without a script:
+1. The system prompt tells it the goal and the constraints.
+2. The tool descriptions tell it what each tool gives and needs, so it can work out what is missing.
+3. Tool results and errors tell it what to do next.
+4. The loop gives it a new decision after every result, so it can adapt to the input instead of following one chain.
