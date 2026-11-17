@@ -87,7 +87,7 @@ def combination_chunks(path):
         chunks.append({
             "id": f"combo::{i}::{slug(a)}::{slug(b)}",
             "text": f"Combination: {a} + {b}\n{item['text']}",
-            "metadata": meta(source=path.name, type="combination", cards=f"{a}|{b}"),
+            "metadata": meta(source=path.name, type="combination", cards="|".join(sorted([a,b]))),
         })
     return chunks
 

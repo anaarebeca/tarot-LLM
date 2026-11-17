@@ -1,0 +1,12 @@
+{
+  "id": "three-card",
+  "name": "Past / Present / Future",
+  "num_cards": 3,
+  "theme": "general",
+  "description": "A quick view of how a situation developed, where it stands now and where it is heading.",
+  "positions": [
+    {"position": 1, "name": "Past", "meaning": "What led to the situation", "theme": "general"},
+    {"position": 2, "name": "Present", "meaning": "The current state of the situation", "theme": "general"},
+    {"position": 3, "name": "Future", "meaning": "Where the situation is heading if nothing changes", "theme": "general"}
+  ]
+}

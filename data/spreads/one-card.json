@@ -1,0 +1,10 @@
+{
+  "id": "one-card",
+  "name": "One Card",
+  "num_cards": 1,
+  "theme": "general",
+  "description": "A quick answer or daily message from a single card. Best for simple questions.",
+  "positions": [
+    {"position": 1, "name": "Core message", "meaning": "The main energy or advice for the question asked", "theme": "general"}
+  ]
+}

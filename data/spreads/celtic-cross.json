@@ -1,0 +1,19 @@
+{
+  "id": "celtic-cross",
+  "name": "Celtic Cross",
+  "num_cards": 10,
+  "theme": "general",
+  "description": "A detailed ten-card spread for complex situations, covering the past, present, hidden influences, advice and outcome.",
+  "positions": [
+    {"position": 1, "name": "Present", "meaning": "The heart of the situation right now", "theme": "general"},
+    {"position": 2, "name": "Challenge", "meaning": "The obstacle or tension crossing the situation", "theme": "general"},
+    {"position": 3, "name": "Past", "meaning": "The foundation and events that led here", "theme": "general"},
+    {"position": 4, "name": "Future", "meaning": "What is likely to happen in the near future", "theme": "general"},
+    {"position": 5, "name": "Conscious", "meaning": "What you consciously think, want or aim for", "theme": "mood"},
+    {"position": 6, "name": "Subconscious", "meaning": "Hidden feelings or beliefs influencing the situation", "theme": "spiritual"},
+    {"position": 7, "name": "Advice", "meaning": "How best to approach the situation", "theme": "general"},
+    {"position": 8, "name": "External influences", "meaning": "People and circumstances around you that affect the situation", "theme": "general"},
+    {"position": 9, "name": "Hopes and fears", "meaning": "What you hope for and what you are afraid of", "theme": "mood"},
+    {"position": 10, "name": "Outcome", "meaning": "The likely result if the current path continues", "theme": "general"}
+  ]
+}
