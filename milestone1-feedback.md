@@ -1,0 +1,1 @@
+The RFC is OK, but for the next steps, diagram one reading end to end: how the selected spread, card positions, and reversals become inputs, how the SLM connects the cards, and how follow-up questions retain the original reading context.
